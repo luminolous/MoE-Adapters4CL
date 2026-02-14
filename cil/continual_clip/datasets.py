@@ -90,6 +90,12 @@ def get_dataset(cfg, is_train, transforms=None):
 
 
 def build_cl_scenarios(cfg, is_train, transforms) -> nn.Module:
+    # DomainNet (M3SDA) is not packaged in continuum and needs split-list handling.
+    # We keep the rest of the repo unchanged by routing DomainNet through a
+    # lightweight list-based scenario builder.
+    if cfg.dataset == "domainnet":
+        from .domainnet import build_domainnet_scenarios
+        return build_domainnet_scenarios(cfg, is_train=is_train, transforms=transforms)
 
     dataset, classes_names = get_dataset(cfg, is_train)
 

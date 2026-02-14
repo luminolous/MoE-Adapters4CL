@@ -1,0 +1,37 @@
+hydra:
+  run:
+    dir: ./experiments/${scenario}/${dataset}_${domainnet_domain}_${initial_increment}-${increment}-${method}
+  job:
+    chdir: true
+
+  job_logging:
+    version: 1
+    formatters:
+      simple:
+        format: '%(message)s'
+
+class_order: ""
+dataset_root: ""
+workdir: ""
+log_path: "metrics.json"
+
+model_name: "ViT-B/16"
+prompt_template: "a bad photo of a {}."
+
+domainnet_domain: "clipart"
+domainnet_txt_root: "txt"
+domainnet_nb_classes: 345
+
+batch_size: 32
+initial_increment: 50
+increment: 50
+scenario: "class"
+dataset: "domainnet"
+
+weight_decay: 0.0
+l2: 0
+ce_method: 0
+
+method: "MoE-Adapters"
+lr: 1e-3
+ls: 0.0

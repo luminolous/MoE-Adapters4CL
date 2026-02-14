@@ -117,6 +117,9 @@ class ClassIncremental(nn.Module):
             elif cfg.dataset == "imagenet100" and task_id != 0:
                 shift = cfg.initial_increment + (task_id - 1) * cfg.increment
                 targets -= shift
+            elif cfg.dataset == "domainnet" and task_id != 0:
+                shift = cfg.initial_increment + (task_id - 1) * cfg.increment
+                targets -= shift
             else:
                 shift = task_id * cfg.increment
                 targets -= shift
@@ -136,7 +139,88 @@ class ClassIncremental(nn.Module):
 
 
 class DomainIncremental(nn.Module):
-    pass
+    """Domain-incremental setting: tasks are domains, but label space is fixed.
+
+    Example target use-case: DomainNet, where each task is one domain
+    (clipart/infograph/painting/quickdraw/real/sketch) and all tasks share
+    the same set of classes.
+    """
+
+    def __init__(self, cfg, device, jit=False):
+        super().__init__()
+        self.prompt_template = cfg.prompt_template
+        self.device = device
+        self.classes_names = None
+        self.model, self.transforms, _ = clip.load(cfg.model_name, device=device, jit=jit)
+
+        self.current_class_names = []
+        self.text_tokens = None
+
+    def forward(self, image, taskid):
+        with torch.no_grad():
+            logits_per_image, _ = self.model(image, self.text_tokens, 0, is_train=False)
+            probs = logits_per_image.softmax(dim=-1)
+        return probs
+
+    def adaptation(self, task_id, cfg, train_dataset, train_classes_names):
+        if self.text_tokens is None:
+            self.current_class_names = list(self.classes_names)
+            self.text_tokens = clip.tokenize(
+                [self.prompt_template.format(c) for c in self.current_class_names]
+            ).to(self.device)
+
+        if cfg.method != "zeroshot":
+            self.train(task_id, cfg, train_dataset)
+
+    def train(self, task_id, cfg, train_dataset):
+        train_loader = DataLoader(
+            train_dataset[task_id:task_id + 1],
+            batch_size=cfg.batch_size,
+            shuffle=True,
+            num_workers=8,
+        )
+        train_iter = iter(train_loader)
+
+        EPOCH = 1
+        num_batches = len(train_loader)
+        total_iterations = EPOCH * num_batches
+
+        for k, v in self.model.named_parameters():
+            if "adaptmlp" not in k and "router" not in k and "noise" not in k:
+                v.requires_grad = False
+
+        params = [
+            v for k, v in self.model.named_parameters()
+            if "adaptmlp" in k or "router" in k or "noise" in k
+        ]
+
+        optimizer = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.weight_decay)
+        scheduler = utils.cosine_lr(
+            optimizer, cfg.lr, 30, total_iterations
+        )
+
+        self.model = self.model.cuda()
+
+        texts = self.text_tokens
+
+        self.model.train()
+        for iteration in tqdm(range(total_iterations + 1)):
+            scheduler(iteration)
+            try:
+                inputs, targets, task_ids = next(train_iter)
+            except:
+                train_iter = iter(train_loader)
+                inputs, targets, task_ids = next(train_iter)
+
+            inputs, targets = inputs.cuda(), targets.cuda()
+            logits_per_image, _ = self.model(inputs, texts, 0, is_train=True)
+            loss = F.cross_entropy(logits_per_image, targets, label_smoothing=cfg.ls)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        self.model.eval()
 
 
 class TaskAgnostic(nn.Module):
@@ -164,4 +248,3 @@ def load_model(cfg: DictConfig, device: torch.device) -> nn.Module:
             `{cfg.scenarios}` is not a valid scenario, 
             Please choose from ['class', "domain', 'task-agnostic']
         """)
-
