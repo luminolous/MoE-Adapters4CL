@@ -83,9 +83,15 @@ class ClassIncremental(nn.Module):
 
         # optimizer
         optimizer = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.weight_decay)
-        scheduler = utils.cosine_lr(
-            optimizer, cfg.lr, 30, total_iterations
-        )
+        # scheduler = utils.cosine_lr(optimizer, cfg.lr, 30, total_iterations)
+
+
+        # Make scheduler safe for small
+        steps = max(1, total_iterations + 1)
+        warmup = min(30, steps - 1)
+
+        scheduler = utils.cosine_lr(optimizer, cfg.lr, warmup, steps)
+
 
         # move model to device
         self.model = self.model.cuda()
@@ -103,7 +109,8 @@ class ClassIncremental(nn.Module):
 
         # start training
         self.model.train()
-        for iteration in tqdm(range(total_iterations + 1)):
+        # for iteration in tqdm(range(total_iterations + 1)):
+        for iteration in tqdm(range(steps)):
             scheduler(iteration)
             try:
                 inputs, targets, task_ids = next(train_iter)
